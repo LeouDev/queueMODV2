@@ -594,7 +594,7 @@
       window.__CASES = cases;
 
       // Refresh segment SLA picker if function exists
-      if(typeof populateSegmentPicker === 'function'){ populateSegmentPicker(sla); }
+      if(typeof populateSegmentPicker === 'function'){ populateSegmentPicker(cases); }
       if(typeof renderSegSlaTable === 'function'){ renderSegSlaTable(); }
     }
 
@@ -640,10 +640,10 @@
       document.getElementById('copyAgingFilter').addEventListener('click', async ()=>{ const txt = tsvFromVisible(document.getElementById('tblAgingFilter')); await navigator.clipboard.writeText(txt); document.getElementById('copyAgingFilter').textContent='Copied!'; setTimeout(()=> document.getElementById('copyAgingFilter').textContent='Copy filtered rows',1200); });
     }
 
-    function populateSegmentPicker(slaRows){
+    function populateSegmentPicker(cases){
       const pick = document.getElementById('segPick');
       const current = pick.value;
-      const segs = [...new Set(slaRows.map(r => r.seg || '(blank)'))].sort();
+      const segs = [...new Set(cases.map(r => r.seg || '(blank)'))].filter(Boolean).sort();
       pick.innerHTML = '<option value="">— choose segment —</option>';
       for(const s of segs){
         const opt = document.createElement('option');
@@ -668,42 +668,68 @@
       const includePast = document.getElementById('includePast').checked;
       const now = dayjs();
 
-      const {sla} = gatherData();
-      const filtered = sla.filter(r => (r.seg||'(blank)') === seg).filter(r => {
-        const hrs = r.due.diff(now,'minute')/60;
-        const isPast = hrs < 0;
-        return (!isPast && hrs <= nearHours) || (includePast && isPast);
-      }).sort((a,b)=> a.due.valueOf() - b.due.valueOf());
+      // Use cases data filtered by segment, sorted by aging desc
+      const {cases} = gatherData();
+      const segCases = cases
+        .filter(r => (r.seg||'(blank)') === seg)
+        .sort((a,b)=> b.agingDays - a.agingDays);
 
-      const total = filtered.length;
-      const rows = limitVal === 'all' ? filtered : filtered.slice(0, 10);
+      // Also get SLA nearness info for each case
+      const {sla} = gatherData();
+      const slaMap = new Map();
+      for(const r of sla) slaMap.set(String(r.caseId).trim(), r);
+
+      // Build combined rows: all cases in segment, mark nearing SLA
+      const nearingRows = [];
+      for(const r of segCases){
+        const slaRow = slaMap.get(String(r.caseId).trim());
+        if(!slaRow) continue;
+        const hrs = slaRow.due.diff(now,'minute')/60;
+        const isPast = hrs < 0;
+        const isNear = (!isPast && hrs <= nearHours) || (includePast && isPast);
+        if(!isNear) continue;
+        nearingRows.push({...r, due: slaRow.due, hrs});
+      }
+
+      // If no SLA column data, fall back to showing all segment cases
+      const displayRows = nearingRows.length > 0 ? nearingRows : segCases;
+      const usingFallback = nearingRows.length === 0 && segCases.length > 0;
+
+      const total = displayRows.length;
+      const rows = limitVal === 'all' ? displayRows : displayRows.slice(0, 10);
 
       tbody.innerHTML = '';
       const frag = document.createDocumentFragment();
       rows.forEach((r, i) => {
-        const hrs = r.due.diff(now,'minute')/60;
-        const isPast = hrs < 0;
-        const badge = isPast ? 'b-bad' : (hrs <= Math.max(nearHours/2,2) ? 'b-warn' : 'b-good');
-        const status = isPast ? 'Past due' : (hrs <= Math.max(nearHours/2,2) ? 'Urgent' : 'Upcoming');
+        const hasDue = r.due != null;
+        const hrs = hasDue ? r.hrs : null;
+        const isPast = hrs != null && hrs < 0;
+        const badge = !hasDue ? '' : isPast ? 'b-bad' : (hrs <= Math.max(nearHours/2,2) ? 'b-warn' : 'b-good');
+        const status = !hasDue ? '' : isPast ? 'Past due' : (hrs <= Math.max(nearHours/2,2) ? 'Urgent' : 'Upcoming');
         const tr = document.createElement('tr');
         tr.innerHTML = `
           <td>${i+1}</td>
           <td>${r.caseId}</td>
           <td>${r.prio||''}</td>
           <td>${r.created ? r.created.format('MM/DD/YYYY h:mm A') : ''}</td>
-          <td>${r.due.format('MM/DD/YYYY h:mm A')}</td>
-          <td>${(hrs).toFixed(1)} h</td>
-          <td><span class="badge ${badge}">${status}</span></td>`;
+          <td>${hasDue ? r.due.format('MM/DD/YYYY h:mm A') : '—'}</td>
+          <td>${hrs != null ? hrs.toFixed(1)+' h' : r.agingFmt+' days'}</td>
+          <td>${badge ? `<span class="badge ${badge}">${status}</span>` : '—'}</td>`;
         frag.appendChild(tr);
       });
       tbody.appendChild(frag);
-      countEl.textContent = limitVal === 'all'
-        ? `Showing all ${total} nearing-SLA case${total!==1?'s':''} for "${seg}"`
-        : `Showing top 10 of ${total} nearing-SLA case${total!==1?'s':''} for "${seg}"${total>10?' — switch to "All" to see the rest':''}`;
+
+      const label = usingFallback
+        ? `No SLA due date found — showing all ${total} case${total!==1?'s':''} for "${seg}" by aging`
+        : limitVal === 'all'
+          ? `Showing all ${total} nearing-SLA case${total!==1?'s':''} for "${seg}"`
+          : `Showing top 10 of ${total} nearing-SLA case${total!==1?'s':''} for "${seg}"${total>10?' — switch to "All" to see more':''}`;
+      countEl.textContent = label;
       filterTable(document.getElementById('searchSegSla'), 'tblSegSla');
     }
 
     wire();
+
     // Segment SLA table wiring
     document.getElementById('segPick').addEventListener('change', renderSegSlaTable);
     document.getElementById('segLimit').addEventListener('change', renderSegSlaTable);
@@ -714,20 +740,6 @@
       document.getElementById('copySegSla').textContent='Copied!';
       setTimeout(()=> document.getElementById('copySegSla').textContent='Copy visible rows',1200);
     });
-
-    // Patch renderAll to also refresh segment picker + table
-    const _origRenderAll = renderAll;
-    function renderAllPatched(){
-      _origRenderAll();
-      const {sla} = gatherData();
-      populateSegmentPicker(sla);
-      renderSegSlaTable();
-    }
-    // Re-bind all renderAll triggers to patched version
-    ;['change','keyup'].forEach(ev => document.getElementById('nearHrs').removeEventListener(ev, renderAll));
-    document.getElementById('nearHrs').addEventListener('change', renderAllPatched);
-    document.getElementById('nearHrs').addEventListener('keyup', renderAllPatched);
-    document.getElementById('includePast').addEventListener('change', renderAllPatched);
 
 </body>
 </html>
