@@ -105,10 +105,6 @@
           <button id="clearAll" class="btn ghost">Clear files</button>
         </div>
         <div class="filetags" id="fileTags"></div>
-        <div id="debugPanel" style="display:none;margin-top:12px;background:#fff3cd;border:1px solid #ffc107;border-radius:10px;padding:12px;font-size:.82rem;color:#664d03">
-          <strong>🔍 Detected Columns (per sheet):</strong>
-          <div id="debugContent" style="margin-top:6px;line-height:1.8"></div>
-        </div>
         <div class="statrow" id="stats" hidden>
           <div class="stat"><div class="k" id="statTotal">–</div><div class="l">Total cases (consolidated)</div></div>
           <div class="stat"><div class="k" id="statAvg">–</div><div class="l">Avg aging (days)</div></div>
@@ -381,7 +377,6 @@
       const now = dayjs();
       const casesOut = [];
       const slaOut = [];
-      const debugLines = [];
 
       for(const f of store.files){
         for(const sName of f.wb.SheetNames){
@@ -390,22 +385,12 @@
           if(!rows.length) continue;
           const hdr = normalizeHeaders(rows[0]);
 
-          const allCols = Object.keys(rows[0]).join(', ');
           const keyCase = hdr.get('Case ID') || hdr.get('CaseID') || hdr.get('Case');
           const keySeg  = hdr.get('Business Segment') || hdr.get('BusinessSegment') || hdr.get('Segment');
           const keyPrio = hdr.get('Priority');
           const keyIntType = hdr.get('Interaction Type') || hdr.get('InteractionType') || hdr.get('Interaction') || hdr.get('Type');
           const keyCreated = hdr.get('Created On') || hdr.get('CreatedOn') || hdr.get('Created');
           const keyDue = hdr.get('Time AutoDeny') || hdr.get('TimeAutoDeny') || hdr.get('AutoDeny') || hdr.get('Auto Deny');
-
-          debugLines.push(`<b>${f.name} → Sheet: "${sName}"</b> (${rows.length} rows)<br>
-            &nbsp;&nbsp;All columns: <code>${allCols}</code><br>
-            &nbsp;&nbsp;Mapped → Case ID: <b>${keyCase||'❌ not found'}</b> | 
-            Business Segment: <b>${keySeg||'❌ not found'}</b> | 
-            Priority: <b>${keyPrio||'❌ not found'}</b> | 
-            Created On: <b>${keyCreated||'❌ not found'}</b> | 
-            Time AutoDeny: <b>${keyDue||'❌ not found'}</b> | 
-            Interaction Type: <b>${keyIntType||'❌ not found'}</b>`);
 
           if(keyCreated){
             for(const r of rows){
@@ -438,16 +423,8 @@
           const key = String(row.caseId||'').trim() || `${row.seg}:${row.prio}:${row.created?.valueOf()}`;
           if(!seen.has(key)) { seen.set(key, true); unique.push(row); }
         }
-        // Show debug panel
-        const dp = document.getElementById('debugPanel');
-        const dc = document.getElementById('debugContent');
-        if(dp && dc){ dp.style.display = debugLines.length ? '' : 'none'; dc.innerHTML = debugLines.join('<hr style="border:none;border-top:1px dashed #ffc107;margin:6px 0">'); }
         return {cases: unique, sla: slaOut};
       }
-      // Show debug panel
-      const dp = document.getElementById('debugPanel');
-      const dc = document.getElementById('debugContent');
-      if(dp && dc){ dp.style.display = debugLines.length ? '' : 'none'; dc.innerHTML = debugLines.join('<hr style="border:none;border-top:1px dashed #ffc107;margin:6px 0">'); }
       return {cases: casesOut, sla: slaOut};
     }
 
