@@ -407,7 +407,7 @@
             Time AutoDeny: <b>${keyDue||'❌ not found'}</b> | 
             Interaction Type: <b>${keyIntType||'❌ not found'}</b>`);
 
-          if(keySeg && keyCreated){
+          if(keyCreated){
             for(const r of rows){
               const created = parseDate(r[keyCreated]);
               if(!created) continue;
@@ -692,13 +692,12 @@
       const now = dayjs();
 
       // Use cases data filtered by segment, sorted by aging desc
-      const {cases} = gatherData();
+      const {cases, sla} = gatherData();
       const segCases = cases
         .filter(r => (r.seg||'(blank)') === seg)
         .sort((a,b)=> b.agingDays - a.agingDays);
 
       // Also get SLA nearness info for each case
-      const {sla} = gatherData();
       const slaMap = new Map();
       for(const r of sla) slaMap.set(String(r.caseId).trim(), r);
 
@@ -764,5 +763,6 @@
       setTimeout(()=> document.getElementById('copySegSla').textContent='Copy visible rows',1200);
     });
 
+  </script>
 </body>
 </html>
